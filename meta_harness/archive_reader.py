@@ -16,6 +16,21 @@ def _load_json(path: Path) -> Dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _load_json_object(path: Path, *, label: str) -> Dict:
+    """Load a JSON object and raise a descriptive error when it is malformed."""
+    try:
+        payload = _load_json(path)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed {label} in {path.parent}: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"{label} in {path.parent} is not a JSON object (got {type(payload).__name__})"
+        )
+
+    return payload
+
+
 def find_run_dirs(archive_root: Path) -> List[Path]:
     """Return run directories containing summary.json."""
     archive_root = archive_root.expanduser().resolve()
@@ -38,7 +53,9 @@ def find_latest_run_dir(archive_root: Path) -> Path:
 def load_manifest(run_dir: Path) -> Dict:
     """Load manifest.json if present."""
     manifest_path = run_dir / "manifest.json"
-    return _load_json(manifest_path) if manifest_path.exists() else {}
+    if not manifest_path.exists():
+        return {}
+    return _load_json_object(manifest_path, label="manifest.json")
 
 
 def load_task_records(run_dir: Path) -> List[Dict]:
@@ -50,7 +67,11 @@ def load_task_records(run_dir: Path) -> List[Dict]:
     records = []
     for task_file in sorted(tasks_dir.glob("*.json")):
         try:
-            records.append(_load_json(task_file))
+            payload = _load_json(task_file)
+            if not isinstance(payload, dict):
+                logger.warning("Skipping non-object task file: %s", task_file)
+                continue
+            records.append(payload)
         except json.JSONDecodeError:
             logger.warning("Skipping corrupted task file: %s", task_file)
             continue
@@ -64,21 +85,21 @@ def load_run_summary(run_dir: Path) -> RunSummary:
     if not summary_path.exists():
         raise FileNotFoundError(f"Missing summary.json in {run_dir}")
 
-    try:
-        payload = _load_json(summary_path)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Malformed summary.json in {run_dir}: {exc}") from exc
-
-    if not isinstance(payload, dict):
-        raise ValueError(f"summary.json in {run_dir} is not a JSON object (got {type(payload).__name__})")
+    payload = _load_json_object(summary_path, label="summary.json")
+    eval_metrics = payload.get("eval_metrics", {})
+    task_results = payload.get("task_results", [])
+    if not isinstance(eval_metrics, dict):
+        raise ValueError(f"summary.json in {run_dir} has non-object eval_metrics")
+    if not isinstance(task_results, list):
+        raise ValueError(f"summary.json in {run_dir} has non-list task_results")
 
     return RunSummary(
         benchmark_name=payload.get("benchmark_name", ""),
         candidate_name=payload.get("candidate_name", ""),
         candidate_path=payload.get("candidate_path", ""),
         run_dir=run_dir,
-        eval_metrics=payload.get("eval_metrics", {}),
-        task_results=payload.get("task_results", []),
+        eval_metrics=eval_metrics,
+        task_results=task_results,
         manifest=load_manifest(run_dir),
     )
 

@@ -55,3 +55,56 @@ def test_load_manifest_missing_is_empty(tmp_path):
     run_dir.mkdir()
 
     assert load_manifest(run_dir) == {}
+
+
+def test_load_manifest_malformed_json_raises(tmp_path):
+    run_dir = tmp_path / "run_d"
+    run_dir.mkdir()
+    (run_dir / "manifest.json").write_text("{not-valid", encoding="utf-8")
+
+    try:
+        load_manifest(run_dir)
+    except ValueError as exc:
+        assert "Malformed manifest.json" in str(exc)
+    else:
+        raise AssertionError("Expected malformed manifest.json to raise ValueError")
+
+
+def test_load_run_summary_rejects_non_object_eval_metrics(tmp_path):
+    run_dir = tmp_path / "run_e"
+    run_dir.mkdir()
+    (run_dir / "summary.json").write_text(json.dumps({
+        "benchmark_name": "tblite",
+        "candidate_name": "snapshot_baseline",
+        "candidate_path": "/tmp/candidate.py",
+        "run_dir": str(run_dir),
+        "eval_metrics": ["bad"],
+        "task_results": [],
+    }), encoding="utf-8")
+
+    try:
+        load_run_summary(run_dir)
+    except ValueError as exc:
+        assert "non-object eval_metrics" in str(exc)
+    else:
+        raise AssertionError("Expected invalid eval_metrics to raise ValueError")
+
+
+def test_load_run_summary_rejects_non_list_task_results(tmp_path):
+    run_dir = tmp_path / "run_f"
+    run_dir.mkdir()
+    (run_dir / "summary.json").write_text(json.dumps({
+        "benchmark_name": "tblite",
+        "candidate_name": "snapshot_baseline",
+        "candidate_path": "/tmp/candidate.py",
+        "run_dir": str(run_dir),
+        "eval_metrics": {},
+        "task_results": {"bad": True},
+    }), encoding="utf-8")
+
+    try:
+        load_run_summary(run_dir)
+    except ValueError as exc:
+        assert "non-list task_results" in str(exc)
+    else:
+        raise AssertionError("Expected invalid task_results to raise ValueError")

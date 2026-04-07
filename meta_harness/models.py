@@ -151,7 +151,9 @@ class SearchSummary:
 
     benchmark_name: str
     baseline_candidate: str
+    baseline_source: str
     baseline_run_dir: Optional[str]
+    baseline_reference: Optional[str]
     seed_candidate: str
     workspace_dir: str
     generated_candidates_dir: str
@@ -164,7 +166,9 @@ class SearchSummary:
         return {
             "benchmark_name": self.benchmark_name,
             "baseline_candidate": self.baseline_candidate,
+            "baseline_source": self.baseline_source,
             "baseline_run_dir": self.baseline_run_dir,
+            "baseline_reference": self.baseline_reference,
             "seed_candidate": self.seed_candidate,
             "workspace_dir": self.workspace_dir,
             "generated_candidates_dir": self.generated_candidates_dir,

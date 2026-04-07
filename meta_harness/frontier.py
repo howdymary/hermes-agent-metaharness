@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from meta_harness.models import FrontierEntry, RunSummary
 
@@ -87,7 +87,24 @@ class FrontierStore:
 
     def best_for_benchmark(self, benchmark_name: str) -> FrontierEntry:
         """Return the best entry for a benchmark by pass rate."""
-        entries = [entry for entry in self.load() if entry.benchmark_name == benchmark_name]
+        entries = self.top_for_benchmark(benchmark_name, limit=1)
         if not entries:
             raise FileNotFoundError(f"No frontier entries for benchmark '{benchmark_name}'")
-        return max(entries, key=lambda entry: entry.pass_rate)
+        return entries[0]
+
+    def top_for_benchmark(
+        self,
+        benchmark_name: str,
+        *,
+        limit: Optional[int] = None,
+        statuses: Optional[List[str]] = None,
+    ) -> List[FrontierEntry]:
+        """Return the top frontier entries for a benchmark."""
+        entries = [entry for entry in self.load() if entry.benchmark_name == benchmark_name]
+        if statuses is not None:
+            allowed = set(statuses)
+            entries = [entry for entry in entries if entry.status in allowed]
+        ranked = sorted(entries, key=lambda entry: (-entry.pass_rate, entry.candidate_name, entry.run_dir))
+        if limit is None:
+            return ranked
+        return ranked[:limit]

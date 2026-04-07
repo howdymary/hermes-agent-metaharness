@@ -58,9 +58,9 @@ The current milestone extends V1 in the most direct way:
 
 1. Richer baseline-vs-candidate reporting
 2. Paired evaluation flow for baseline plus candidate
-3. Deterministic wrapper mutations around a seed candidate
-4. Structured search over generated variants
-5. Frontier updates based on baseline-relative outcomes
+3. Baseline reuse from existing runs or frontier-best entries
+4. Deterministic wrapper mutations around a seed candidate
+5. Structured search over generated variants
 
 ## V1 Functional Requirements
 
@@ -117,6 +117,8 @@ Persist:
 Support:
 
 - evaluating a candidate directly against a baseline candidate
+- reusing a previously evaluated baseline run
+- selecting a baseline from the current frontier
 - emitting a richer report with improvement/regression counts
 - writing report JSON for later inspection
 
@@ -126,7 +128,7 @@ Support:
 
 - generating wrapper candidates from a seed candidate
 - deterministic prompt/tool/loop mutations
-- evaluating each generated candidate against the same baseline
+- evaluating each generated candidate against the same baseline, including reused baselines
 - recording per-trial reports and a search summary
 
 ## Non-Goals for V1

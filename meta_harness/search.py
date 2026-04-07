@@ -8,7 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from meta_harness.benchmark_runner import run_benchmark
+from meta_harness.baseline import resolve_baseline_selection
+from meta_harness.benchmark_runner import BenchmarkRunResult, run_benchmark
 from meta_harness.candidate_registry import resolve_candidate_path
 from meta_harness.comparison import build_comparison_report
 from meta_harness.config import MetaHarnessConfig
@@ -24,6 +25,8 @@ class StructuredSearchRequest:
     benchmark: str
     seed_candidate: str
     baseline_candidate: str = "snapshot_baseline"
+    baseline_run_dir: Optional[Path] = None
+    baseline_frontier_path: Optional[Path] = None
     workspace_dir: Optional[Path] = None
     archive_root: Optional[Path] = None
     mutation_slugs: Sequence[str] = field(default_factory=tuple)
@@ -63,7 +66,17 @@ def run_structured_search(
     reports_dir = workspace_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    seed_candidate_path = resolve_candidate_path(request.seed_candidate, config.hermes_agent_path)
+    # Allow the seed candidate's parent dir and workspace as valid roots,
+    # since search explicitly accepts arbitrary seed paths.
+    seed_raw = Path(request.seed_candidate).expanduser().resolve()
+    extra_roots = [workspace_dir, generated_candidates_dir]
+    if seed_raw.parent.exists():
+        extra_roots.append(seed_raw.parent)
+    seed_candidate_path = resolve_candidate_path(
+        request.seed_candidate,
+        config.hermes_agent_path,
+        extra_allowed_roots=extra_roots,
+    )
     seed_candidate_name = seed_candidate_path.stem
     mutations: List[MutationSpec] = resolve_mutation_specs(request.mutation_slugs)
     generated_candidates = generate_variant_candidates(
@@ -73,22 +86,39 @@ def run_structured_search(
         mutations=mutations,
     )
 
-    baseline_spec = BenchmarkRunSpec(
-        benchmark=request.benchmark,
-        candidate=request.baseline_candidate,
-        archive_root=archive_root,
-        run_name=f"baseline__{safe_slug(request.baseline_candidate)}",
-        hermes_config_path=request.hermes_config_path,
-        task_filter=request.task_filter,
-        skip_tasks=request.skip_tasks,
-        python_executable=request.python_executable or config.python_executable,
+    baseline_selection = resolve_baseline_selection(
+        benchmark_name=request.benchmark,
+        baseline_candidate=request.baseline_candidate,
+        baseline_run_dir=request.baseline_run_dir,
+        baseline_frontier_path=request.baseline_frontier_path,
     )
-    baseline_result = run_benchmark(config, baseline_spec, dry_run=dry_run)
+    if baseline_selection.requires_fresh_run:
+        baseline_spec = BenchmarkRunSpec(
+            benchmark=request.benchmark,
+            candidate=baseline_selection.baseline_candidate,
+            archive_root=archive_root,
+            run_name=f"baseline__{safe_slug(baseline_selection.baseline_candidate)}",
+            hermes_config_path=request.hermes_config_path,
+            task_filter=request.task_filter,
+            skip_tasks=request.skip_tasks,
+            python_executable=request.python_executable or config.python_executable,
+        )
+        baseline_result = run_benchmark(config, baseline_spec, dry_run=dry_run)
+    else:
+        baseline_result = BenchmarkRunResult(
+            command=[],
+            archive_root=archive_root,
+            returncode=0,
+            run_dir=baseline_selection.run_dir,
+            summary=baseline_selection.summary,
+        )
 
     summary = SearchSummary(
         benchmark_name=request.benchmark,
-        baseline_candidate=request.baseline_candidate,
+        baseline_candidate=baseline_selection.baseline_candidate,
+        baseline_source=baseline_selection.source,
         baseline_run_dir=str(baseline_result.run_dir) if baseline_result.run_dir else None,
+        baseline_reference=baseline_selection.reference,
         seed_candidate=request.seed_candidate,
         workspace_dir=str(workspace_dir),
         generated_candidates_dir=str(generated_candidates_dir),
@@ -121,7 +151,7 @@ def run_structured_search(
                     trial_result.summary,
                     status="candidate_beats_baseline" if report.candidate_better else "evaluated",
                     notes=(
-                        f"baseline={request.baseline_candidate}; pass_rate_delta={report.pass_rate_delta:+.4f}; "
+                        f"baseline={baseline_selection.baseline_candidate}; pass_rate_delta={report.pass_rate_delta:+.4f}; "
                         f"net_task_gain={report.net_task_gain}; regressions={report.regressed_tasks}"
                     ),
                 )

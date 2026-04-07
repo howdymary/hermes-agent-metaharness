@@ -37,7 +37,11 @@ def _validate_candidate_containment(
     hermes_agent_path: Path,
     extra_allowed_roots: Optional[Sequence[Path]] = None,
 ) -> None:
-    """Raise if the resolved candidate path escapes all allowed roots."""
+    """Raise if the resolved candidate path escapes all allowed roots.
+
+    Allowed roots include the Hermes builtins dir, the Hermes repo,
+    the current working directory, and any explicitly provided extra roots.
+    """
     allowed = [
         builtin_candidates_dir(hermes_agent_path).resolve(),
         hermes_agent_path.resolve(),

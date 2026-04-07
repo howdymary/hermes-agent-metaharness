@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from meta_harness.benchmark_runner import BenchmarkRunResult
 from meta_harness.config import MetaHarnessConfig
@@ -24,7 +25,7 @@ def test_run_structured_search_dry_run_generates_candidates(tmp_path, monkeypatc
 
     calls = []
 
-    def fake_run_benchmark(config_arg, run_spec, *, dry_run=False, capture_output=False):
+    def fake_run_benchmark(config_arg, run_spec, *, dry_run=False, timeout=None):
         assert dry_run is True
         calls.append(run_spec.candidate)
         return BenchmarkRunResult(
@@ -62,7 +63,7 @@ def test_run_structured_search_writes_reports_and_updates_frontier(tmp_path, mon
     seed_candidate.write_text("# seed\n", encoding="utf-8")
     frontier_path = tmp_path / "frontier.json"
 
-    def fake_run_benchmark(config_arg, run_spec, *, dry_run=False, capture_output=False):
+    def fake_run_benchmark(config_arg, run_spec, *, dry_run=False, timeout=None):
         run_dir = run_spec.archive_root / (run_spec.run_name or Path(run_spec.candidate).stem)
         run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -148,3 +149,132 @@ def test_run_structured_search_writes_reports_and_updates_frontier(tmp_path, mon
     best = frontier.best_for_benchmark("tblite")
     assert "plan_briefly" in best.candidate_name
     assert best.status == "candidate_beats_baseline"
+
+
+def test_run_structured_search_reuses_existing_baseline_run(tmp_path, monkeypatch):
+    config = _make_config(tmp_path)
+    seed_candidate = tmp_path / "seed.py"
+    seed_candidate.write_text("# seed\n", encoding="utf-8")
+    baseline_run = tmp_path / "baseline_run"
+    baseline_run.mkdir()
+    (baseline_run / "summary.json").write_text(json.dumps({
+        "benchmark_name": "tblite",
+        "candidate_name": "reused_baseline",
+        "candidate_path": "/tmp/reused_baseline.py",
+        "run_dir": str(baseline_run),
+        "eval_metrics": {
+            "eval/pass_rate": 0.4,
+            "eval/passed_tasks": 4,
+            "eval/evaluation_time_seconds": 9.0,
+        },
+        "task_results": [{"task_name": "a", "passed": False, "reward": 0.0}],
+    }), encoding="utf-8")
+
+    calls = []
+
+    def fake_run_benchmark(config_arg, run_spec, *, dry_run=False, timeout=None):
+        calls.append(run_spec.candidate)
+        run_dir = run_spec.archive_root / (run_spec.run_name or Path(run_spec.candidate).stem)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return BenchmarkRunResult(
+            command=["python3", str(run_spec.candidate)],
+            archive_root=run_spec.archive_root,
+            returncode=0,
+            run_dir=run_dir,
+            summary=RunSummary(
+                benchmark_name=run_spec.benchmark,
+                candidate_name=Path(run_spec.candidate).stem,
+                candidate_path=str(run_spec.candidate),
+                run_dir=run_dir,
+                eval_metrics={
+                    "eval/pass_rate": 0.5,
+                    "eval/passed_tasks": 5,
+                    "eval/evaluation_time_seconds": 8.0,
+                },
+                task_results=[{"task_name": "a", "passed": True, "reward": 1.0}],
+            ),
+        )
+
+    monkeypatch.setattr("meta_harness.search.run_benchmark", fake_run_benchmark)
+
+    summary = run_structured_search(
+        config,
+        StructuredSearchRequest(
+            benchmark="tblite",
+            seed_candidate=str(seed_candidate),
+            baseline_run_dir=baseline_run,
+            workspace_dir=tmp_path / "workspace",
+            mutation_slugs=("plan_briefly",),
+            python_executable="python3",
+        ),
+        dry_run=False,
+    )
+
+    assert summary.baseline_source == "existing_run"
+    assert summary.baseline_run_dir == str(baseline_run.resolve())
+    assert calls == [str((tmp_path / "workspace" / "generated_candidates" / "seed__plan_briefly.py").resolve())]
+
+
+def test_run_structured_search_reuses_frontier_baseline(tmp_path, monkeypatch):
+    config = _make_config(tmp_path)
+    seed_candidate = tmp_path / "seed.py"
+    seed_candidate.write_text("# seed\n", encoding="utf-8")
+
+    frontier_run = tmp_path / "frontier_run"
+    frontier_run.mkdir()
+    (frontier_run / "summary.json").write_text(json.dumps({
+        "benchmark_name": "tblite",
+        "candidate_name": "frontier_best",
+        "candidate_path": "/tmp/frontier_best.py",
+        "run_dir": str(frontier_run),
+        "eval_metrics": {"eval/pass_rate": 0.7},
+        "task_results": [{"task_name": "a", "passed": True, "reward": 1.0}],
+    }), encoding="utf-8")
+
+    frontier = FrontierStore(tmp_path / "frontier.json")
+    frontier.upsert_from_summary(
+        RunSummary(
+            benchmark_name="tblite",
+            candidate_name="frontier_best",
+            candidate_path="/tmp/frontier_best.py",
+            run_dir=frontier_run,
+            eval_metrics={"eval/pass_rate": 0.7},
+        )
+    )
+
+    def fake_run_benchmark(config_arg, run_spec, *, dry_run=False, timeout=None):
+        run_dir = run_spec.archive_root / (run_spec.run_name or Path(run_spec.candidate).stem)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return BenchmarkRunResult(
+            command=["python3", str(run_spec.candidate)],
+            archive_root=run_spec.archive_root,
+            returncode=0,
+            run_dir=run_dir,
+            summary=RunSummary(
+                benchmark_name=run_spec.benchmark,
+                candidate_name=Path(run_spec.candidate).stem,
+                candidate_path=str(run_spec.candidate),
+                run_dir=run_dir,
+                eval_metrics={"eval/pass_rate": 0.8, "eval/passed_tasks": 8},
+                task_results=[{"task_name": "a", "passed": True, "reward": 1.0}],
+            ),
+        )
+
+    monkeypatch.setattr("meta_harness.search.run_benchmark", fake_run_benchmark)
+
+    summary = run_structured_search(
+        config,
+        StructuredSearchRequest(
+            benchmark="tblite",
+            seed_candidate=str(seed_candidate),
+            baseline_frontier_path=frontier.path,
+            workspace_dir=tmp_path / "workspace",
+            mutation_slugs=("plan_briefly",),
+            python_executable="python3",
+        ),
+        dry_run=False,
+    )
+
+    assert summary.baseline_source == "frontier_best"
+    assert summary.baseline_candidate == "frontier_best"
+    assert summary.baseline_reference == str(frontier.path)

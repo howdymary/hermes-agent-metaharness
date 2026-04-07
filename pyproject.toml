@@ -7,15 +7,31 @@ name = "hermes-agent-metaharness"
 version = "0.1.0"
 description = "Standalone outer-loop Meta-Harness orchestration for Hermes Agent"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.9"
 authors = [
     {name = "Mary Liu"},
+]
+keywords = ["llm", "agents", "harness", "evaluation", "search", "hermes"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Testing",
 ]
 dependencies = [
     "click>=8.0",
     "rich>=13.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/howdymary/hermes-agent-metaharness"
+Repository = "https://github.com/howdymary/hermes-agent-metaharness"
+Issues = "https://github.com/howdymary/hermes-agent-metaharness/issues"
 
 [project.optional-dependencies]
 dev = [

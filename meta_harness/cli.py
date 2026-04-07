@@ -11,7 +11,8 @@ from rich.console import Console
 from rich.table import Table
 
 from meta_harness.archive_reader import load_run_summary
-from meta_harness.benchmark_runner import run_benchmark
+from meta_harness.baseline import resolve_baseline_selection
+from meta_harness.benchmark_runner import BenchmarkRunResult, run_benchmark
 from meta_harness.candidate_registry import list_builtin_candidates
 from meta_harness.comparison import build_comparison_report
 from meta_harness.config import MetaHarnessConfig
@@ -99,6 +100,11 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _format_command(command: Iterable[str], *, fallback: str) -> str:
+    rendered = " ".join(command).strip()
+    return rendered if rendered else fallback
+
+
 @main.command("list-builtins")
 @click.option("--hermes-repo", type=click.Path(exists=True, file_okay=False), help="Path to the hermes-agent checkout.")
 def list_builtins_cmd(hermes_repo: Optional[str] = None) -> None:
@@ -117,6 +123,34 @@ def list_mutations_cmd() -> None:
     table.add_column("Description")
     for slug, mutation in builtin_mutations().items():
         table.add_row(slug, mutation.description)
+    console.print(table)
+
+
+@main.command("show-frontier")
+@click.option("--frontier-path", required=True, type=click.Path(exists=True, dir_okay=False), help="Path to a frontier JSON file.")
+@click.option("--benchmark", required=True, help="Benchmark name to inspect.")
+@click.option("--limit", default=10, show_default=True, type=int, help="Maximum entries to show.")
+def show_frontier_cmd(frontier_path: str, benchmark: str, limit: int) -> None:
+    """Show ranked frontier entries for one benchmark."""
+    frontier = FrontierStore(Path(frontier_path).expanduser().resolve())
+    entries = frontier.top_for_benchmark(benchmark, limit=limit)
+    if not entries:
+        raise click.ClickException(f"No frontier entries found for benchmark '{benchmark}'.")
+
+    table = Table(title=f"Frontier: {benchmark}")
+    table.add_column("Rank", justify="right")
+    table.add_column("Candidate", style="bold")
+    table.add_column("Pass Rate", justify="right")
+    table.add_column("Status")
+    table.add_column("Run Dir")
+    for index, entry in enumerate(entries, start=1):
+        table.add_row(
+            str(index),
+            entry.candidate_name,
+            f"{entry.pass_rate:.4f}",
+            entry.status,
+            entry.run_dir,
+        )
     console.print(table)
 
 
@@ -229,6 +263,8 @@ def compare_runs_cmd(
 @main.command("evaluate-vs-baseline")
 @click.option("--candidate", required=True, help="Candidate file path or built-in Hermes candidate name.")
 @click.option("--baseline-candidate", default="snapshot_baseline", show_default=True)
+@click.option("--baseline-run", type=click.Path(exists=True, file_okay=False), help="Reuse an existing baseline run directory instead of running one.")
+@click.option("--baseline-from-frontier", type=click.Path(exists=True, dir_okay=False), help="Reuse the current best frontier entry for this benchmark as baseline.")
 @click.option("--benchmark", default="tblite", type=click.Choice(["tblite", "tb2"]), show_default=True)
 @click.option("--hermes-repo", type=click.Path(exists=True, file_okay=False), help="Path to the hermes-agent checkout.")
 @click.option("--archive-dir", help="Archive root for the paired evaluation.")
@@ -242,8 +278,10 @@ def compare_runs_cmd(
 @click.option("--dry-run", is_flag=True, help="Print benchmark commands without executing them.")
 def evaluate_vs_baseline_cmd(
     candidate: str,
-    baseline_candidate: str,
     benchmark: str,
+    baseline_candidate: str,
+    baseline_run: Optional[str] = None,
+    baseline_from_frontier: Optional[str] = None,
     hermes_repo: Optional[str] = None,
     archive_dir: Optional[str] = None,
     candidate_run_name: Optional[str] = None,
@@ -260,6 +298,15 @@ def evaluate_vs_baseline_cmd(
     archive_root = Path(archive_dir).expanduser().resolve() if archive_dir else (
         config.output_dir / "comparisons" / benchmark
     )
+    try:
+        baseline_selection = resolve_baseline_selection(
+            benchmark_name=benchmark,
+            baseline_candidate=baseline_candidate,
+            baseline_run_dir=Path(baseline_run).expanduser().resolve() if baseline_run else None,
+            baseline_frontier_path=Path(baseline_from_frontier).expanduser().resolve() if baseline_from_frontier else None,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     common_kwargs = {
         "benchmark": benchmark,
@@ -269,11 +316,6 @@ def evaluate_vs_baseline_cmd(
         "skip_tasks": skip_tasks,
         "python_executable": config.python_executable,
     }
-    baseline_spec = BenchmarkRunSpec(
-        candidate=baseline_candidate,
-        run_name=baseline_run_name or f"baseline__{safe_slug(baseline_candidate)}",
-        **common_kwargs,
-    )
     candidate_spec = BenchmarkRunSpec(
         candidate=candidate,
         run_name=candidate_run_name or f"candidate__{safe_slug(candidate)}",
@@ -283,18 +325,39 @@ def evaluate_vs_baseline_cmd(
     console.print(f"\n[bold cyan]Baseline vs Candidate Evaluation[/bold cyan]")
     console.print(f"  Hermes repo: {config.hermes_agent_path}")
     console.print(f"  Benchmark: {benchmark}")
-    console.print(f"  Baseline: {baseline_candidate}")
+    console.print(f"  Baseline: {baseline_selection.display_label}")
+    console.print(f"  Baseline source: {baseline_selection.source}")
     console.print(f"  Candidate: {candidate}")
     console.print(f"  Archive root: {archive_root}")
 
-    baseline_result = run_benchmark(config, baseline_spec, dry_run=dry_run)
+    if baseline_selection.requires_fresh_run:
+        baseline_spec = BenchmarkRunSpec(
+            candidate=baseline_selection.baseline_candidate,
+            run_name=baseline_run_name or f"baseline__{safe_slug(baseline_selection.baseline_candidate)}",
+            **common_kwargs,
+        )
+        baseline_result = run_benchmark(config, baseline_spec, dry_run=dry_run)
+    else:
+        baseline_result = BenchmarkRunResult(
+            command=[],
+            archive_root=archive_root,
+            returncode=0,
+            run_dir=baseline_selection.run_dir,
+            summary=baseline_selection.summary,
+        )
     candidate_result = run_benchmark(config, candidate_spec, dry_run=dry_run)
 
     command_table = Table(title="Commands")
     command_table.add_column("Run", style="bold")
     command_table.add_column("Command")
-    command_table.add_row("Baseline", " ".join(baseline_result.command))
-    command_table.add_row("Candidate", " ".join(candidate_result.command))
+    command_table.add_row(
+        "Baseline",
+        _format_command(
+            baseline_result.command,
+            fallback=f"(reused {baseline_selection.source}: {baseline_selection.reference or baseline_selection.display_label})",
+        ),
+    )
+    command_table.add_row("Candidate", _format_command(candidate_result.command, fallback="(no command)"))
     console.print()
     console.print(command_table)
 
@@ -317,7 +380,7 @@ def evaluate_vs_baseline_cmd(
             candidate_result.summary,
             status="candidate_beats_baseline" if report.candidate_better else "evaluated",
             notes=(
-                f"baseline={baseline_candidate}; pass_rate_delta={report.pass_rate_delta:+.4f}; "
+                f"baseline={baseline_selection.baseline_candidate}; pass_rate_delta={report.pass_rate_delta:+.4f}; "
                 f"net_task_gain={report.net_task_gain}; regressions={report.regressed_tasks}"
             ),
         )
@@ -327,6 +390,8 @@ def evaluate_vs_baseline_cmd(
 @main.command("search-candidates")
 @click.option("--seed-candidate", required=True, help="Seed candidate file path or built-in Hermes candidate name.")
 @click.option("--baseline-candidate", default="snapshot_baseline", show_default=True)
+@click.option("--baseline-run", type=click.Path(exists=True, file_okay=False), help="Reuse an existing baseline run directory instead of running one.")
+@click.option("--baseline-from-frontier", type=click.Path(exists=True, dir_okay=False), help="Reuse the current best frontier entry for this benchmark as baseline.")
 @click.option("--benchmark", default="tblite", type=click.Choice(["tblite", "tb2"]), show_default=True)
 @click.option("--hermes-repo", type=click.Path(exists=True, file_okay=False), help="Path to the hermes-agent checkout.")
 @click.option("--workspace-dir", help="Workspace directory for generated candidates, reports, and search summary.")
@@ -339,8 +404,10 @@ def evaluate_vs_baseline_cmd(
 @click.option("--dry-run", is_flag=True, help="Generate candidate files and print commands without executing benchmarks.")
 def search_candidates_cmd(
     seed_candidate: str,
-    baseline_candidate: str,
     benchmark: str,
+    baseline_candidate: str,
+    baseline_run: Optional[str] = None,
+    baseline_from_frontier: Optional[str] = None,
     hermes_repo: Optional[str] = None,
     workspace_dir: Optional[str] = None,
     archive_dir: Optional[str] = None,
@@ -357,6 +424,8 @@ def search_candidates_cmd(
         benchmark=benchmark,
         seed_candidate=seed_candidate,
         baseline_candidate=baseline_candidate,
+        baseline_run_dir=Path(baseline_run).expanduser().resolve() if baseline_run else None,
+        baseline_frontier_path=Path(baseline_from_frontier).expanduser().resolve() if baseline_from_frontier else None,
         workspace_dir=Path(workspace_dir).expanduser().resolve() if workspace_dir else None,
         archive_root=Path(archive_dir).expanduser().resolve() if archive_dir else None,
         mutation_slugs=tuple(mutations),
@@ -367,13 +436,18 @@ def search_candidates_cmd(
         python_executable=config.python_executable,
     )
 
-    summary = run_structured_search(config, request, dry_run=dry_run)
+    try:
+        summary = run_structured_search(config, request, dry_run=dry_run)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     overview = Table(title="Structured Search")
     overview.add_column("Metric", style="bold")
     overview.add_column("Value")
     overview.add_row("Benchmark", summary.benchmark_name)
     overview.add_row("Baseline Candidate", summary.baseline_candidate)
+    overview.add_row("Baseline Source", summary.baseline_source)
+    overview.add_row("Baseline Reference", summary.baseline_reference or "-")
     overview.add_row("Seed Candidate", summary.seed_candidate)
     overview.add_row("Workspace", summary.workspace_dir)
     overview.add_row("Generated Candidates", summary.generated_candidates_dir)
