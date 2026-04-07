@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import List
 
@@ -20,14 +22,30 @@ class FrontierStore:
         """Load all frontier entries."""
         if not self.path.exists():
             return []
-        payload = json.loads(self.path.read_text())
+        payload = json.loads(self.path.read_text(encoding="utf-8"))
         return [FrontierEntry(**entry) for entry in payload]
 
     def save(self, entries: List[FrontierEntry]) -> None:
-        """Save the frontier."""
-        self.path.write_text(
-            json.dumps([entry.to_dict() for entry in entries], indent=2, sort_keys=True)
+        """Save the frontier atomically via temp file + rename."""
+        content = json.dumps(
+            [entry.to_dict() for entry in entries], indent=2, sort_keys=True
         )
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(self.path.parent), suffix=".tmp", prefix=".frontier_"
+        )
+        closed = False
+        try:
+            os.write(fd, content.encode("utf-8"))
+            os.fsync(fd)
+            os.close(fd)
+            closed = True
+            os.replace(tmp_path, self.path)
+        except BaseException:
+            if not closed:
+                os.close(fd)
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
 
     def upsert_from_summary(
         self,

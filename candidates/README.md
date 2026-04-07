@@ -24,3 +24,21 @@ python -m meta_harness evaluate-candidate \
   --candidate candidates/template_candidate.py \
   --benchmark tblite
 ```
+
+You can also compare it directly against a baseline candidate:
+
+```bash
+python -m meta_harness evaluate-vs-baseline \
+  --candidate candidates/template_candidate.py \
+  --baseline-candidate snapshot_baseline \
+  --benchmark tblite
+```
+
+And you can use it as the seed for a structured wrapper-candidate search:
+
+```bash
+python -m meta_harness search-candidates \
+  --seed-candidate candidates/template_candidate.py \
+  --baseline-candidate snapshot_baseline \
+  --benchmark tblite
+```

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,10 @@ from meta_harness.candidate_registry import resolve_candidate_path
 from meta_harness.config import MetaHarnessConfig
 from meta_harness.models import BenchmarkRunSpec, RunSummary
 
+logger = logging.getLogger(__name__)
+
+# Default timeout for benchmark subprocess (30 minutes).
+DEFAULT_BENCHMARK_TIMEOUT_S = 1800
 
 BENCHMARK_SCRIPTS = {
     "tblite": "environments/benchmarks/tblite/tblite_env.py",
@@ -78,7 +83,7 @@ def run_benchmark(
     run_spec: BenchmarkRunSpec,
     *,
     dry_run: bool = False,
-    capture_output: bool = False,
+    timeout: Optional[int] = None,
 ) -> BenchmarkRunResult:
     """Run one Hermes benchmark and load the resulting archive summary."""
     archive_root = run_spec.archive_root.expanduser().resolve()
@@ -92,21 +97,44 @@ def run_benchmark(
             returncode=0,
         )
 
+    effective_timeout = timeout if timeout is not None else DEFAULT_BENCHMARK_TIMEOUT_S
+
     before = _existing_run_dirs(archive_root)
-    result = subprocess.run(
-        command,
-        cwd=str(config.hermes_agent_path),
-        text=True,
-        capture_output=capture_output,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(config.hermes_agent_path),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=effective_timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"Benchmark timed out after {effective_timeout}s. "
+            f"Command: {' '.join(command)}"
+        ) from exc
 
     if result.returncode != 0:
-        raise RuntimeError(f"Benchmark command failed with exit code {result.returncode}")
+        logger.error("Benchmark stderr:\n%s", result.stderr)
+        raise RuntimeError(
+            f"Benchmark command failed with exit code {result.returncode}.\n"
+            f"stderr: {(result.stderr or '').strip()[:2000]}"
+        )
 
     after = _existing_run_dirs(archive_root)
     new_run_dirs = sorted(after - before, key=lambda path: path.stat().st_mtime)
-    run_dir = new_run_dirs[-1] if new_run_dirs else find_run_dirs(archive_root)[-1]
+
+    if new_run_dirs:
+        run_dir = new_run_dirs[-1]
+    else:
+        fallback = find_run_dirs(archive_root)
+        if not fallback:
+            raise RuntimeError(
+                f"Benchmark succeeded but produced no run directory under {archive_root}"
+            )
+        run_dir = fallback[-1]
+
     summary = load_run_summary(run_dir)
 
     return BenchmarkRunResult(

@@ -52,6 +52,16 @@ V1 is the minimum outer-loop foundation:
 4. Compare baseline vs candidate runs.
 5. Persist a simple frontier of evaluated candidates.
 
+## Current Milestone
+
+The current milestone extends V1 in the most direct way:
+
+1. Richer baseline-vs-candidate reporting
+2. Paired evaluation flow for baseline plus candidate
+3. Deterministic wrapper mutations around a seed candidate
+4. Structured search over generated variants
+5. Frontier updates based on baseline-relative outcomes
+
 ## V1 Functional Requirements
 
 ### Candidate Resolution
@@ -89,6 +99,8 @@ Compute:
 - numeric metric deltas
 - task-level improvements/regressions
 - pass-rate deltas
+- net task gain
+- candidate-better judgement using a stable ranking rule
 
 ### Frontier Persistence
 
@@ -100,6 +112,23 @@ Persist:
 - run dir
 - notes/status
 
+### Baseline Reporting
+
+Support:
+
+- evaluating a candidate directly against a baseline candidate
+- emitting a richer report with improvement/regression counts
+- writing report JSON for later inspection
+
+### Structured Search
+
+Support:
+
+- generating wrapper candidates from a seed candidate
+- deterministic prompt/tool/loop mutations
+- evaluating each generated candidate against the same baseline
+- recording per-trial reports and a search summary
+
 ## Non-Goals for V1
 
 - changing `run_agent.py`
@@ -108,15 +137,15 @@ Persist:
 - weight training or finetuning
 - open-ended non-verifiable optimization
 
-## V2
+## Next Stage
 
-After V1 works:
+After the current milestone works:
 
-1. Candidate templating
-2. Candidate mutation
+1. Better mutation spaces and composition
+2. Smarter baseline selection and report ranking
 3. Trace-driven reflective edits
-4. Search/frontier management
-5. Benchmark-aware ranking and selection policy
+4. Frontier-aware search policies
+5. Benchmark-aware candidate generation
 
 ## Success Criteria
 

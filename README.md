@@ -8,8 +8,9 @@ It does not reimplement Hermes runtime behavior. Instead, it treats `hermes-agen
 - benchmark evaluation orchestration
 - archive reading
 - run comparison
+- richer baseline-vs-candidate reporting
 - frontier tracking
-- later, candidate mutation and search
+- structured candidate mutation and search
 
 ## Boundary
 
@@ -37,6 +38,12 @@ V1 provides:
 - read Hermes-produced archives (`manifest.json`, `summary.json`, `tasks/*.json`)
 - compare two runs
 - persist a simple frontier
+
+The current milestone also adds:
+
+- paired baseline-vs-candidate evaluation and reporting
+- built-in deterministic wrapper mutations
+- structured search over generated candidate variants
 
 ## Quick Start
 
@@ -70,6 +77,26 @@ python -m meta_harness compare-runs \
   --candidate-run /path/to/candidate-run
 ```
 
+Run a candidate directly against a baseline and emit a richer report:
+
+```bash
+python -m meta_harness evaluate-vs-baseline \
+  --candidate candidates/template_candidate.py \
+  --baseline-candidate snapshot_baseline \
+  --benchmark tblite \
+  --hermes-repo /Users/maryliu/Projects/hermes-agent
+```
+
+Run a small deterministic search over generated wrapper candidates:
+
+```bash
+python -m meta_harness search-candidates \
+  --seed-candidate candidates/template_candidate.py \
+  --baseline-candidate snapshot_baseline \
+  --benchmark tblite \
+  --hermes-repo /Users/maryliu/Projects/hermes-agent
+```
+
 ## Repo Layout
 
 ```text
@@ -80,6 +107,8 @@ meta_harness/
 ├── benchmark_runner.py
 ├── archive_reader.py
 ├── comparison.py
+├── mutation.py
+├── search.py
 ├── frontier.py
 ├── cli.py
 └── __main__.py
@@ -89,8 +118,8 @@ Local candidate files can live in [`candidates/README.md`](/Users/maryliu/Projec
 
 ## Near-Term Roadmap
 
-1. Stable candidate evaluation and comparison
-2. Baseline helpers and richer reports
-3. Candidate templating and mutation
-4. Search/frontier management
-5. Trace-driven reflective candidate improvement
+1. Stable candidate evaluation, comparison, and richer reports
+2. Structured mutation search over generated wrapper candidates
+3. Better ranking/reporting and baseline selection policies
+4. Trace-driven reflective candidate improvement
+5. More adaptive candidate generation strategies

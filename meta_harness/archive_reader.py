@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from meta_harness.models import RunSummary
 
+logger = logging.getLogger(__name__)
+
 
 def _load_json(path: Path) -> Dict:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def find_run_dirs(archive_root: Path) -> List[Path]:
@@ -49,6 +52,7 @@ def load_task_records(run_dir: Path) -> List[Dict]:
         try:
             records.append(_load_json(task_file))
         except json.JSONDecodeError:
+            logger.warning("Skipping corrupted task file: %s", task_file)
             continue
     return records
 
@@ -60,12 +64,19 @@ def load_run_summary(run_dir: Path) -> RunSummary:
     if not summary_path.exists():
         raise FileNotFoundError(f"Missing summary.json in {run_dir}")
 
-    payload = _load_json(summary_path)
+    try:
+        payload = _load_json(summary_path)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Malformed summary.json in {run_dir}: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError(f"summary.json in {run_dir} is not a JSON object (got {type(payload).__name__})")
+
     return RunSummary(
         benchmark_name=payload.get("benchmark_name", ""),
         candidate_name=payload.get("candidate_name", ""),
         candidate_path=payload.get("candidate_path", ""),
-        run_dir=Path(payload.get("run_dir") or run_dir),
+        run_dir=run_dir,
         eval_metrics=payload.get("eval_metrics", {}),
         task_results=payload.get("task_results", []),
         manifest=load_manifest(run_dir),
