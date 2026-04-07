@@ -73,6 +73,36 @@ Point it at Hermes with either:
 - a sibling checkout at `../hermes-agent`
 - or `~/.hermes/hermes-agent`
 
+If Hermes needs to run inside a managed environment, Meta-Harness can launch it
+through a shell-style prefix such as:
+
+- `--launcher-prefix "uv run --python 3.12 --extra rl"`
+- `--python-executable /path/to/hermes-agent/.mh-venv/bin/python`
+
+## Choosing a Backend
+
+Users should choose the strongest coding backend available in their Hermes
+benchmark config. Meta-Harness does not hardcode a model provider; it delegates
+backend choice to Hermes through `--hermes-config-path`.
+
+Common options:
+
+- OpenRouter or other OpenAI-compatible hosted backends via a Hermes YAML config
+- local vLLM servers for stronger self-hosted coding models
+- local Ollama endpoints for smoke tests and low-cost local iteration
+
+For example, you can point Meta-Harness at any Hermes benchmark config that
+defines a stronger coding model:
+
+```bash
+python -m meta_harness evaluate-candidate \
+  --candidate snapshot_baseline \
+  --benchmark tblite \
+  --hermes-repo /path/to/hermes-agent \
+  --python-executable /path/to/hermes-agent/.mh-venv/bin/python \
+  --hermes-config-path /path/to/your_stronger_backend.yaml
+```
+
 Dry-run a built-in Hermes candidate on TBLite:
 
 ```bash
@@ -80,6 +110,7 @@ python -m meta_harness evaluate-candidate \
   --candidate snapshot_baseline \
   --benchmark tblite \
   --hermes-repo /path/to/hermes-agent \
+  --launcher-prefix "uv run --python 3.12 --extra rl" \
   --dry-run
 ```
 
@@ -98,7 +129,8 @@ python -m meta_harness evaluate-vs-baseline \
   --candidate candidates/template_candidate.py \
   --baseline-candidate snapshot_baseline \
   --benchmark tblite \
-  --hermes-repo /path/to/hermes-agent
+  --hermes-repo /path/to/hermes-agent \
+  --launcher-prefix "uv run --python 3.12 --extra rl"
 ```
 
 Reuse an existing baseline run instead of rerunning baseline:
@@ -118,7 +150,8 @@ python -m meta_harness search-candidates \
   --seed-candidate candidates/template_candidate.py \
   --baseline-candidate snapshot_baseline \
   --benchmark tblite \
-  --hermes-repo /path/to/hermes-agent
+  --hermes-repo /path/to/hermes-agent \
+  --launcher-prefix "uv run --python 3.12 --extra rl"
 ```
 
 Inspect the current frontier for a benchmark:
@@ -148,6 +181,9 @@ meta_harness/
 ```
 
 Candidate files can live in `candidates/`, with an example in `candidates/template_candidate.py`.
+
+Two local benchmark configs are also included in `configs/` for smoke-testing
+against an Ollama OpenAI-compatible endpoint on `http://localhost:11434/v1`.
 
 ## Release Notes
 

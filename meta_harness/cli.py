@@ -15,7 +15,7 @@ from meta_harness.baseline import resolve_baseline_selection
 from meta_harness.benchmark_runner import BenchmarkRunResult, run_benchmark
 from meta_harness.candidate_registry import list_builtin_candidates
 from meta_harness.comparison import build_comparison_report
-from meta_harness.config import MetaHarnessConfig
+from meta_harness.config import MetaHarnessConfig, parse_command_prefix
 from meta_harness.frontier import FrontierStore
 from meta_harness.models import BenchmarkRunSpec
 from meta_harness.mutation import builtin_mutations, safe_slug
@@ -88,10 +88,21 @@ def _emit_report(report, *, show_task_names: bool = True) -> None:
         console.print(improved_table)
 
 
-def _build_config(hermes_repo: Optional[str]) -> MetaHarnessConfig:
+def _build_config(
+    hermes_repo: Optional[str],
+    *,
+    launcher_prefix: Optional[str] = None,
+    python_executable: Optional[str] = None,
+) -> MetaHarnessConfig:
     config = MetaHarnessConfig()
     if hermes_repo:
         config.hermes_agent_path = Path(hermes_repo).expanduser().resolve()
+    if launcher_prefix is not None:
+        config.launch_prefix = parse_command_prefix(launcher_prefix)
+        if python_executable is None:
+            config.python_executable = "python" if config.launch_prefix else config.python_executable
+    if python_executable is not None:
+        config.python_executable = python_executable
     return config
 
 
@@ -160,6 +171,8 @@ def show_frontier_cmd(frontier_path: str, benchmark: str, limit: int) -> None:
 @click.option("--candidate", required=True, help="Candidate file path or built-in Hermes candidate name.")
 @click.option("--benchmark", default="tblite", type=click.Choice(["tblite", "tb2"]), show_default=True)
 @click.option("--hermes-repo", type=click.Path(exists=True, file_okay=False), help="Path to the hermes-agent checkout.")
+@click.option("--launcher-prefix", help="Shell-style prefix used to launch Hermes, e.g. 'uv run --python 3.12 --extra rl'.")
+@click.option("--python-executable", help="Python command executed inside the launcher prefix. Defaults to 'python' when a launcher prefix is set.")
 @click.option("--archive-dir", help="Archive root for Hermes Meta-Harness run outputs.")
 @click.option("--run-name", help="Optional friendly run name.")
 @click.option("--hermes-config-path", type=click.Path(exists=True, dir_okay=False), help="Optional Hermes benchmark YAML config path.")
@@ -171,6 +184,8 @@ def evaluate_candidate_cmd(
     candidate: str,
     benchmark: str,
     hermes_repo: Optional[str] = None,
+    launcher_prefix: Optional[str] = None,
+    python_executable: Optional[str] = None,
     archive_dir: Optional[str] = None,
     run_name: Optional[str] = None,
     hermes_config_path: Optional[str] = None,
@@ -180,7 +195,11 @@ def evaluate_candidate_cmd(
     dry_run: bool = False,
 ) -> None:
     """Evaluate one Meta-Harness candidate against Hermes."""
-    config = _build_config(hermes_repo)
+    config = _build_config(
+        hermes_repo,
+        launcher_prefix=launcher_prefix,
+        python_executable=python_executable,
+    )
 
     archive_root = Path(archive_dir).expanduser().resolve() if archive_dir else (
         config.output_dir / "archives" / benchmark
@@ -269,6 +288,8 @@ def compare_runs_cmd(
 @click.option("--baseline-from-frontier", type=click.Path(exists=True, dir_okay=False), help="Reuse the current best frontier entry for this benchmark as baseline.")
 @click.option("--benchmark", default="tblite", type=click.Choice(["tblite", "tb2"]), show_default=True)
 @click.option("--hermes-repo", type=click.Path(exists=True, file_okay=False), help="Path to the hermes-agent checkout.")
+@click.option("--launcher-prefix", help="Shell-style prefix used to launch Hermes, e.g. 'uv run --python 3.12 --extra rl'.")
+@click.option("--python-executable", help="Python command executed inside the launcher prefix. Defaults to 'python' when a launcher prefix is set.")
 @click.option("--archive-dir", help="Archive root for the paired evaluation.")
 @click.option("--candidate-run-name", help="Optional candidate run name.")
 @click.option("--baseline-run-name", help="Optional baseline run name.")
@@ -285,6 +306,8 @@ def evaluate_vs_baseline_cmd(
     baseline_run: Optional[str] = None,
     baseline_from_frontier: Optional[str] = None,
     hermes_repo: Optional[str] = None,
+    launcher_prefix: Optional[str] = None,
+    python_executable: Optional[str] = None,
     archive_dir: Optional[str] = None,
     candidate_run_name: Optional[str] = None,
     baseline_run_name: Optional[str] = None,
@@ -296,7 +319,11 @@ def evaluate_vs_baseline_cmd(
     dry_run: bool = False,
 ) -> None:
     """Run a baseline and candidate, then emit a richer comparison report."""
-    config = _build_config(hermes_repo)
+    config = _build_config(
+        hermes_repo,
+        launcher_prefix=launcher_prefix,
+        python_executable=python_executable,
+    )
     archive_root = Path(archive_dir).expanduser().resolve() if archive_dir else (
         config.output_dir / "comparisons" / benchmark
     )
@@ -398,6 +425,8 @@ def evaluate_vs_baseline_cmd(
 @click.option("--baseline-from-frontier", type=click.Path(exists=True, dir_okay=False), help="Reuse the current best frontier entry for this benchmark as baseline.")
 @click.option("--benchmark", default="tblite", type=click.Choice(["tblite", "tb2"]), show_default=True)
 @click.option("--hermes-repo", type=click.Path(exists=True, file_okay=False), help="Path to the hermes-agent checkout.")
+@click.option("--launcher-prefix", help="Shell-style prefix used to launch Hermes, e.g. 'uv run --python 3.12 --extra rl'.")
+@click.option("--python-executable", help="Python command executed inside the launcher prefix. Defaults to 'python' when a launcher prefix is set.")
 @click.option("--workspace-dir", help="Workspace directory for generated candidates, reports, and search summary.")
 @click.option("--archive-dir", help="Archive root for evaluations inside this search.")
 @click.option("--mutation", "mutations", multiple=True, help="Mutation slug to include. Repeat to add more.")
@@ -413,6 +442,8 @@ def search_candidates_cmd(
     baseline_run: Optional[str] = None,
     baseline_from_frontier: Optional[str] = None,
     hermes_repo: Optional[str] = None,
+    launcher_prefix: Optional[str] = None,
+    python_executable: Optional[str] = None,
     workspace_dir: Optional[str] = None,
     archive_dir: Optional[str] = None,
     mutations: Iterable[str] = (),
@@ -423,7 +454,11 @@ def search_candidates_cmd(
     dry_run: bool = False,
 ) -> None:
     """Run a small deterministic search over generated wrapper candidates."""
-    config = _build_config(hermes_repo)
+    config = _build_config(
+        hermes_repo,
+        launcher_prefix=launcher_prefix,
+        python_executable=python_executable,
+    )
     request = StructuredSearchRequest(
         benchmark=benchmark,
         seed_candidate=seed_candidate,

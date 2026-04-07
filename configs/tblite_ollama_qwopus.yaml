@@ -1,0 +1,27 @@
+# OpenThoughts-TBLite Evaluation -- Local Docker + Ollama Qwen Backend
+
+env:
+  enabled_toolsets: ["terminal", "file"]
+  max_agent_turns: 36
+  max_token_length: 16000
+  agent_temperature: 0.2
+  terminal_backend: "docker"
+  terminal_timeout: 180
+  tool_pool_size: 4
+  dataset_name: "NousResearch/openthoughts-tblite"
+  test_timeout: 300
+  task_timeout: 720
+  eval_concurrency: 1
+  tool_call_parser: "hermes"
+  system_prompt: "You are an expert terminal agent. Use the provided tools to complete the task. Prefer short, concrete plans, avoid redundant environment probing, and verify important work with tools before finishing."
+  tokenizer_name: "Qwen/Qwen3-4B-Instruct-2507"
+  use_wandb: false
+  wandb_name: "tblite-ollama-qwopus"
+  ensure_scores_are_not_same: false
+  data_dir_to_save_evals: "environments/benchmarks/evals/tblite-ollama-qwopus"
+
+openai:
+  base_url: "http://localhost:11434/v1"
+  model_name: "qwopus-q4km-quiet:latest"
+  server_type: "openai"
+  health_check: false

@@ -53,9 +53,11 @@ def build_benchmark_command(config: MetaHarnessConfig, run_spec: BenchmarkRunSpe
     """Build a Hermes benchmark command for one candidate run."""
     benchmark_script = resolve_benchmark_script(run_spec.benchmark, config.hermes_agent_path)
     candidate_path = resolve_candidate_path(run_spec.candidate, config.hermes_agent_path)
+    python_executable = run_spec.python_executable or config.python_executable
 
     command = [
-        run_spec.python_executable or config.python_executable,
+        *config.launch_prefix,
+        python_executable,
         str(benchmark_script),
         "evaluate",
         "--env.meta_harness_candidate",

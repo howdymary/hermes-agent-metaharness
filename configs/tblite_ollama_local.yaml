@@ -1,0 +1,30 @@
+# OpenThoughts-TBLite Evaluation -- Local Docker + Ollama Backend
+#
+# Small local config for smoke-testing Meta-Harness candidates against a
+# real OpenAI-compatible model server exposed by Ollama.
+
+env:
+  enabled_toolsets: ["terminal", "file"]
+  max_agent_turns: 30
+  max_token_length: 12000
+  agent_temperature: 0.2
+  terminal_backend: "docker"
+  terminal_timeout: 180
+  tool_pool_size: 4
+  dataset_name: "NousResearch/openthoughts-tblite"
+  test_timeout: 300
+  task_timeout: 600
+  eval_concurrency: 1
+  tool_call_parser: "hermes"
+  system_prompt: "You are an expert terminal agent. Use the provided tools to complete the task. Prefer short, concrete plans and verify important work with tools before finishing."
+  tokenizer_name: "NousResearch/Hermes-3-Llama-3.1-8B"
+  use_wandb: false
+  wandb_name: "tblite-ollama-local"
+  ensure_scores_are_not_same: false
+  data_dir_to_save_evals: "environments/benchmarks/evals/tblite-ollama-local"
+
+openai:
+  base_url: "http://localhost:11434/v1"
+  model_name: "llama3.2:3b"
+  server_type: "openai"
+  health_check: false

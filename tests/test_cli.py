@@ -119,3 +119,41 @@ def test_search_candidates_cli_dry_run(monkeypatch, tmp_path):
     assert "Structured Search" in result.output
     assert "fresh_candidate" in result.output
     assert "seed__plan_briefly" in result.output
+
+
+def test_evaluate_candidate_cli_supports_launcher_prefix(monkeypatch, tmp_path):
+    hermes_repo = tmp_path / "hermes-agent"
+    hermes_repo.mkdir()
+    captured = {}
+
+    def fake_run_benchmark(config, run_spec, *, dry_run=False, timeout=None):
+        captured["launch_prefix"] = config.launch_prefix
+        captured["python_executable"] = config.python_executable
+        return BenchmarkRunResult(
+            command=["uv", "run", "--python", "3.12", "--extra", "rl", "python", "bench.py"],
+            archive_root=run_spec.archive_root,
+            returncode=0,
+        )
+
+    monkeypatch.setattr("meta_harness.cli.run_benchmark", fake_run_benchmark)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "evaluate-candidate",
+            "--candidate",
+            "snapshot_baseline",
+            "--benchmark",
+            "tblite",
+            "--hermes-repo",
+            str(hermes_repo),
+            "--launcher-prefix",
+            "uv run --python 3.12 --extra rl",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["launch_prefix"] == ("uv", "run", "--python", "3.12", "--extra", "rl")
+    assert captured["python_executable"] == "python"

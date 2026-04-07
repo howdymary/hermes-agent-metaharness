@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +30,26 @@ def get_hermes_agent_path() -> Path:
     )
 
 
+def parse_command_prefix(value: str | None) -> tuple[str, ...]:
+    """Parse a shell-style command prefix into argv tokens."""
+    if not value:
+        return ()
+    return tuple(token for token in shlex.split(value) if token)
+
+
+def _default_launch_prefix() -> tuple[str, ...]:
+    """Default benchmark launcher prefix from the environment."""
+    return parse_command_prefix(os.getenv("HERMES_LAUNCH_PREFIX"))
+
+
+def _default_python_executable() -> str:
+    """Choose the Python entrypoint used inside the benchmark launcher."""
+    env_value = os.getenv("HERMES_PYTHON_EXECUTABLE")
+    if env_value:
+        return env_value
+    return "python" if _default_launch_prefix() else sys.executable
+
+
 @dataclass
 class MetaHarnessConfig:
     """Base configuration for the standalone Meta-Harness repo."""
@@ -36,4 +57,5 @@ class MetaHarnessConfig:
     hermes_agent_path: Path = field(default_factory=get_hermes_agent_path)
     output_dir: Path = field(default_factory=lambda: Path("./output"))
     default_benchmark: str = "tblite"
-    python_executable: str = field(default_factory=lambda: sys.executable)
+    launch_prefix: tuple[str, ...] = field(default_factory=_default_launch_prefix)
+    python_executable: str = field(default_factory=_default_python_executable)
