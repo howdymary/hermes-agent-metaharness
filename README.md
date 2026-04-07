@@ -55,7 +55,8 @@ The current release provides:
 - archive parsing for `manifest.json`, `summary.json`, and `tasks/*.json`
 - paired baseline-vs-candidate evaluation and reporting
 - baseline reuse from an existing run or the current frontier-best entry
-- a simple JSON-backed frontier
+- task-selection comparability metadata for reused baselines
+- a simple JSON-backed frontier with cross-platform locking
 - deterministic wrapper-mutation search over generated candidate variants
 
 ## Quick Start
@@ -155,6 +156,7 @@ This repo is intentionally research-oriented:
 - it optimizes harness procedure, not model weights
 - it is designed around verifiable benchmark feedback
 - it keeps Hermes core stable by treating Hermes as the execution backend
+- reused baselines are validated against the same task-selection hash before comparison
 
 ## Near-Term Roadmap
 

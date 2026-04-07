@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
+# Maximum fraction of tasks that can regress before a candidate is rejected.
+MAX_REGRESSION_RATIO = 0.10
+
+
 @dataclass
 class BenchmarkRunSpec:
     """One benchmark execution request."""
@@ -89,12 +93,12 @@ class ComparisonReport:
 
     @property
     def candidate_better(self) -> bool:
-        return comparison_sort_key(self) > comparison_sort_key_for_values(
-            pass_rate_delta=0.0,
-            passed_tasks_delta=0.0,
-            regressed_tasks=0,
-            evaluation_time_delta_seconds=0.0,
-        )
+        """A candidate is better only if it improves pass rate AND does not regress too many tasks."""
+        if self.pass_rate_delta <= 0.0:
+            return False
+        if self.total_tasks > 0 and self.regressed_tasks / self.total_tasks > MAX_REGRESSION_RATIO:
+            return False
+        return True
 
     def ranking_key(self) -> Tuple[float, float, int, float]:
         return comparison_sort_key(self)
@@ -118,6 +122,8 @@ class FrontierEntry:
     benchmark_name: str
     run_dir: str
     pass_rate: float
+    total_tasks: int = 0
+    task_selection_hash: str = ""
     status: str = "evaluated"
     notes: str = ""
 
@@ -196,11 +202,16 @@ def comparison_sort_key_for_values(
     regressed_tasks: int,
     evaluation_time_delta_seconds: Optional[float],
 ) -> Tuple[float, float, int, float]:
-    """Shared ranking rule for deciding whether a candidate beats baseline."""
+    """Shared ranking rule for deciding whether a candidate beats baseline.
+
+    Regressions are weighted before pass_rate_delta so that a candidate
+    with many regressions never outranks one with fewer regressions
+    unless it also has a strictly higher pass rate delta.
+    """
     eval_time = float(evaluation_time_delta_seconds or 0.0)
     return (
+        -int(regressed_tasks),
         round(float(pass_rate_delta), 10),
         round(float(passed_tasks_delta), 10),
-        -int(regressed_tasks),
         round(-eval_time, 10),
     )

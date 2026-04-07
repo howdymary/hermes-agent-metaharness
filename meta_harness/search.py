@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Sequence
+
+logger = logging.getLogger(__name__)
 
 from meta_harness.baseline import resolve_baseline_selection
 from meta_harness.benchmark_runner import BenchmarkRunResult, run_benchmark
@@ -91,6 +94,8 @@ def run_structured_search(
         baseline_candidate=request.baseline_candidate,
         baseline_run_dir=request.baseline_run_dir,
         baseline_frontier_path=request.baseline_frontier_path,
+        task_filter=request.task_filter,
+        skip_tasks=request.skip_tasks,
     )
     if baseline_selection.requires_fresh_run:
         baseline_spec = BenchmarkRunSpec(
@@ -126,58 +131,86 @@ def run_structured_search(
 
     frontier = FrontierStore(request.frontier_path) if request.frontier_path else None
 
-    for mutation, candidate_path in zip(mutations, generated_candidates):
-        run_spec = BenchmarkRunSpec(
-            benchmark=request.benchmark,
-            candidate=str(candidate_path),
-            archive_root=archive_root,
-            run_name=f"trial__{mutation.slug}",
-            hermes_config_path=request.hermes_config_path,
-            task_filter=request.task_filter,
-            skip_tasks=request.skip_tasks,
-            python_executable=request.python_executable or config.python_executable,
-        )
-        trial_result = run_benchmark(config, run_spec, dry_run=dry_run)
-
-        report = None
-        if not dry_run:
-            if baseline_result.summary is None or trial_result.summary is None:
-                raise RuntimeError("Structured search expected benchmark summaries for baseline and trial.")
-            report = build_comparison_report(baseline_result.summary, trial_result.summary)
-            report_path = reports_dir / f"{mutation.slug}.json"
-            report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
-            if frontier is not None:
-                frontier.upsert_from_summary(
-                    trial_result.summary,
-                    status="candidate_beats_baseline" if report.candidate_better else "evaluated",
-                    notes=(
-                        f"baseline={baseline_selection.baseline_candidate}; pass_rate_delta={report.pass_rate_delta:+.4f}; "
-                        f"net_task_gain={report.net_task_gain}; regressions={report.regressed_tasks}"
-                    ),
-                )
-
-        summary.trial_results.append(
-            SearchTrialResult(
-                mutation_slug=mutation.slug,
-                mutation_description=mutation.description,
-                candidate_name=candidate_path.stem,
-                candidate_path=str(candidate_path),
-                run_dir=str(trial_result.run_dir) if trial_result.run_dir else None,
-                report=report,
-                command=trial_result.command,
-                returncode=trial_result.returncode,
+    try:
+        for mutation, candidate_path in zip(mutations, generated_candidates):
+            run_spec = BenchmarkRunSpec(
+                benchmark=request.benchmark,
+                candidate=str(candidate_path),
+                archive_root=archive_root,
+                run_name=f"trial__{mutation.slug}",
+                hermes_config_path=request.hermes_config_path,
+                task_filter=request.task_filter,
+                skip_tasks=request.skip_tasks,
+                python_executable=request.python_executable or config.python_executable,
             )
-        )
 
-    ranked = [trial for trial in summary.trial_results if trial.report is not None]
-    if ranked:
-        best = max(ranked, key=lambda trial: trial.report.ranking_key())
-        summary.best_mutation_slug = best.mutation_slug
-        summary.best_candidate_name = best.candidate_name
-        summary.best_run_dir = best.run_dir
+            try:
+                trial_result = run_benchmark(config, run_spec, dry_run=dry_run)
+            except RuntimeError as exc:
+                logger.error("Trial %s failed: %s", mutation.slug, exc)
+                summary.trial_results.append(
+                    SearchTrialResult(
+                        mutation_slug=mutation.slug,
+                        mutation_description=mutation.description,
+                        candidate_name=candidate_path.stem,
+                        candidate_path=str(candidate_path),
+                        returncode=-1,
+                    )
+                )
+                continue
 
-    if not dry_run:
-        summary_path = workspace_dir / "search_summary.json"
-        summary_path.write_text(json.dumps(summary.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+            report = None
+            if not dry_run:
+                if baseline_result.summary is None or trial_result.summary is None:
+                    logger.error("Trial %s: missing summary for baseline or trial.", mutation.slug)
+                    summary.trial_results.append(
+                        SearchTrialResult(
+                            mutation_slug=mutation.slug,
+                            mutation_description=mutation.description,
+                            candidate_name=candidate_path.stem,
+                            candidate_path=str(candidate_path),
+                            run_dir=str(trial_result.run_dir) if trial_result.run_dir else None,
+                            command=trial_result.command,
+                            returncode=trial_result.returncode,
+                        )
+                    )
+                    continue
+                report = build_comparison_report(baseline_result.summary, trial_result.summary)
+                report_path = reports_dir / f"{mutation.slug}.json"
+                report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+                if frontier is not None:
+                    frontier.upsert_from_summary(
+                        trial_result.summary,
+                        status="candidate_beats_baseline" if report.candidate_better else "evaluated",
+                        notes=(
+                            f"baseline={baseline_selection.baseline_candidate}; pass_rate_delta={report.pass_rate_delta:+.4f}; "
+                            f"net_task_gain={report.net_task_gain}; regressions={report.regressed_tasks}"
+                        ),
+                    )
+
+            summary.trial_results.append(
+                SearchTrialResult(
+                    mutation_slug=mutation.slug,
+                    mutation_description=mutation.description,
+                    candidate_name=candidate_path.stem,
+                    candidate_path=str(candidate_path),
+                    run_dir=str(trial_result.run_dir) if trial_result.run_dir else None,
+                    report=report,
+                    command=trial_result.command,
+                    returncode=trial_result.returncode,
+                )
+            )
+    finally:
+        # Always persist partial results so crashed searches leave a record.
+        ranked = [trial for trial in summary.trial_results if trial.report is not None]
+        if ranked:
+            best = max(ranked, key=lambda trial: trial.report.ranking_key())
+            summary.best_mutation_slug = best.mutation_slug
+            summary.best_candidate_name = best.candidate_name
+            summary.best_run_dir = best.run_dir
+
+        if not dry_run:
+            summary_path = workspace_dir / "search_summary.json"
+            summary_path.write_text(json.dumps(summary.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
 
     return summary

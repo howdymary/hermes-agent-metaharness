@@ -25,6 +25,7 @@ classifiers = [
 ]
 dependencies = [
     "click>=8.0",
+    "filelock>=3.16",
     "rich>=13.0",
 ]
 

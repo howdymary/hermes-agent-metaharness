@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Set
 
-from meta_harness.archive_reader import find_run_dirs, load_run_summary
+from meta_harness.archive_reader import find_run_dirs, load_manifest, load_run_summary
+from meta_harness.comparability import build_task_selection_metadata
 from meta_harness.candidate_registry import resolve_candidate_path
 from meta_harness.config import MetaHarnessConfig
 from meta_harness.models import BenchmarkRunSpec, RunSummary
@@ -78,6 +80,31 @@ def _existing_run_dirs(archive_root: Path) -> Set[Path]:
     return {path.resolve() for path in find_run_dirs(archive_root)}
 
 
+def _total_tasks(summary: RunSummary) -> int:
+    """Return the total task count for a run summary."""
+    return int(summary.eval_metrics.get("eval/total_tasks") or len(summary.task_results) or 0)
+
+
+def _write_outer_loop_manifest(run_dir: Path, run_spec: BenchmarkRunSpec, summary: RunSummary) -> None:
+    """Persist outer-loop comparability metadata alongside Hermes' manifest."""
+    manifest_path = run_dir / "manifest.json"
+    manifest = load_manifest(run_dir)
+    outer_loop = manifest.get("outer_loop")
+    if not isinstance(outer_loop, dict):
+        outer_loop = {}
+    outer_loop["benchmark_runner"] = {
+        "benchmark": run_spec.benchmark,
+        "candidate": summary.candidate_name,
+        "total_tasks": _total_tasks(summary),
+        "task_selection": build_task_selection_metadata(
+            task_filter=run_spec.task_filter,
+            skip_tasks=run_spec.skip_tasks,
+        ),
+    }
+    manifest["outer_loop"] = outer_loop
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def run_benchmark(
     config: MetaHarnessConfig,
     run_spec: BenchmarkRunSpec,
@@ -135,6 +162,8 @@ def run_benchmark(
             )
         run_dir = fallback[-1]
 
+    summary = load_run_summary(run_dir)
+    _write_outer_loop_manifest(run_dir, run_spec, summary)
     summary = load_run_summary(run_dir)
 
     return BenchmarkRunResult(

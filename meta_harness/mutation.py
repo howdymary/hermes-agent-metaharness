@@ -157,9 +157,7 @@ from environments.meta_harness.types import LoopSettings, ToolSelection
 
 _SEED_CANDIDATE_PATH = {str(seed_candidate_path.resolve())!r}
 _VARIANT_NAME = {variant_name!r}
-_MUTATION = json.loads(
-    """{mutation_payload}"""
-)
+_MUTATION = json.loads({repr(mutation_payload)})
 
 
 def _tool_name(tool_schema):

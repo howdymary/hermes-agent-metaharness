@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Dict, List, Optional, Set
 
 from meta_harness.models import ComparisonReport, RunComparison, RunSummary, TaskDelta
@@ -17,7 +18,10 @@ def _numeric_metric_deltas(
         baseline_value = baseline_metrics.get(key)
         candidate_value = candidate_metrics.get(key)
         if isinstance(baseline_value, (int, float)) and isinstance(candidate_value, (int, float)):
-            deltas[key] = round(float(candidate_value) - float(baseline_value), 10)
+            delta = round(float(candidate_value) - float(baseline_value), 10)
+            if not math.isfinite(delta):
+                continue
+            deltas[key] = delta
     return deltas
 
 

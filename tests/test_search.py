@@ -1,7 +1,8 @@
-from pathlib import Path
 import json
+from pathlib import Path
 
 from meta_harness.benchmark_runner import BenchmarkRunResult
+from meta_harness.comparability import build_task_selection_metadata
 from meta_harness.config import MetaHarnessConfig
 from meta_harness.frontier import FrontierStore
 from meta_harness.models import RunSummary
@@ -16,6 +17,19 @@ def _make_config(tmp_path):
         output_dir=tmp_path / "output",
         python_executable="python3",
     )
+
+
+def _write_task_selection_manifest(run_dir, *, task_filter=None, skip_tasks=None):
+    (run_dir / "manifest.json").write_text(json.dumps({
+        "outer_loop": {
+            "benchmark_runner": {
+                "task_selection": build_task_selection_metadata(
+                    task_filter=task_filter,
+                    skip_tasks=skip_tasks,
+                )
+            }
+        }
+    }), encoding="utf-8")
 
 
 def test_run_structured_search_dry_run_generates_candidates(tmp_path, monkeypatch):
@@ -169,6 +183,7 @@ def test_run_structured_search_reuses_existing_baseline_run(tmp_path, monkeypatc
         },
         "task_results": [{"task_name": "a", "passed": False, "reward": 0.0}],
     }), encoding="utf-8")
+    _write_task_selection_manifest(baseline_run)
 
     calls = []
 
@@ -230,6 +245,7 @@ def test_run_structured_search_reuses_frontier_baseline(tmp_path, monkeypatch):
         "eval_metrics": {"eval/pass_rate": 0.7},
         "task_results": [{"task_name": "a", "passed": True, "reward": 1.0}],
     }), encoding="utf-8")
+    _write_task_selection_manifest(frontier_run)
 
     frontier = FrontierStore(tmp_path / "frontier.json")
     frontier.upsert_from_summary(
@@ -239,6 +255,7 @@ def test_run_structured_search_reuses_frontier_baseline(tmp_path, monkeypatch):
             candidate_path="/tmp/frontier_best.py",
             run_dir=frontier_run,
             eval_metrics={"eval/pass_rate": 0.7},
+            manifest={"outer_loop": {"benchmark_runner": {"task_selection": build_task_selection_metadata(task_filter=None, skip_tasks=None)}}},
         )
     )
 

@@ -1,9 +1,11 @@
 import subprocess
+import json
 from pathlib import Path
 
 import pytest
 
 from meta_harness.benchmark_runner import build_benchmark_command, resolve_benchmark_script, run_benchmark
+from meta_harness.comparability import build_task_selection_metadata
 from meta_harness.config import MetaHarnessConfig
 from meta_harness.models import BenchmarkRunSpec, RunSummary
 
@@ -154,3 +156,49 @@ def test_run_benchmark_loads_latest_new_run_dir(tmp_path, monkeypatch):
 
     result = run_benchmark(config, run_spec)
     assert result.run_dir == after_run.resolve()
+
+
+def test_run_benchmark_writes_outer_loop_manifest_metadata(tmp_path, monkeypatch):
+    config, run_spec = _make_runner_fixture(tmp_path)
+    run_spec.task_filter = "task_b, task_a"
+    run_spec.skip_tasks = "task_x"
+    run_dir = run_spec.archive_root / "run_a"
+    run_dir.mkdir(parents=True)
+
+    class Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    call_count = {"value": 0}
+
+    def fake_find_run_dirs(path):
+        call_count["value"] += 1
+        return [] if call_count["value"] == 1 else [run_dir]
+
+    monkeypatch.setattr("meta_harness.benchmark_runner.subprocess.run", lambda *args, **kwargs: Result())
+    monkeypatch.setattr("meta_harness.benchmark_runner.find_run_dirs", fake_find_run_dirs)
+    monkeypatch.setattr(
+        "meta_harness.benchmark_runner.load_run_summary",
+        lambda resolved_run_dir: RunSummary(
+            benchmark_name="tblite",
+            candidate_name="snapshot_baseline",
+            candidate_path="/tmp/snapshot_baseline.py",
+            run_dir=resolved_run_dir,
+            eval_metrics={"eval/pass_rate": 0.5, "eval/total_tasks": 12},
+            task_results=[{"task_name": "a", "passed": True}],
+            manifest={},
+        ),
+    )
+
+    run_benchmark(config, run_spec)
+
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    runner_manifest = manifest["outer_loop"]["benchmark_runner"]
+    assert runner_manifest["benchmark"] == "tblite"
+    assert runner_manifest["candidate"] == "snapshot_baseline"
+    assert runner_manifest["total_tasks"] == 12
+    assert runner_manifest["task_selection"] == build_task_selection_metadata(
+        task_filter="task_b, task_a",
+        skip_tasks="task_x",
+    )

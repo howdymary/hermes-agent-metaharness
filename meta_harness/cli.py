@@ -140,6 +140,7 @@ def show_frontier_cmd(frontier_path: str, benchmark: str, limit: int) -> None:
     table = Table(title=f"Frontier: {benchmark}")
     table.add_column("Rank", justify="right")
     table.add_column("Candidate", style="bold")
+    table.add_column("Total Tasks", justify="right")
     table.add_column("Pass Rate", justify="right")
     table.add_column("Status")
     table.add_column("Run Dir")
@@ -147,6 +148,7 @@ def show_frontier_cmd(frontier_path: str, benchmark: str, limit: int) -> None:
         table.add_row(
             str(index),
             entry.candidate_name,
+            str(entry.total_tasks),
             f"{entry.pass_rate:.4f}",
             entry.status,
             entry.run_dir,
@@ -304,6 +306,8 @@ def evaluate_vs_baseline_cmd(
             baseline_candidate=baseline_candidate,
             baseline_run_dir=Path(baseline_run).expanduser().resolve() if baseline_run else None,
             baseline_frontier_path=Path(baseline_from_frontier).expanduser().resolve() if baseline_from_frontier else None,
+            task_filter=task_filter,
+            skip_tasks=skip_tasks,
         )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc

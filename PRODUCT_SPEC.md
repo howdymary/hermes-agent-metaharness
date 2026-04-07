@@ -109,6 +109,7 @@ Persist:
 - candidate identity
 - benchmark
 - pass rate
+- total task count
 - run dir
 - notes/status
 
@@ -119,6 +120,7 @@ Support:
 - evaluating a candidate directly against a baseline candidate
 - reusing a previously evaluated baseline run
 - selecting a baseline from the current frontier
+- validating reused baselines against the same task-selection hash
 - emitting a richer report with improvement/regression counts
 - writing report JSON for later inspection
 
